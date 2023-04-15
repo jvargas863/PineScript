@@ -1,0 +1,580 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © juanvargas21979
+
+//@version=5
+//indicator(title="Grid V2", shorttitle='Grid V2', overlay=true, max_bars_back=2000, max_lines_count=500)
+
+strategy("Strategy GRID DCA V2 [JUAN-VARGAS]",
+             shorttitle = "GRID DCA V2 [JUAN-VARGAS]",
+             overlay=true,
+             initial_capital=100000000000,
+             currency=currency.USD,
+             default_qty_value=1,
+             default_qty_type=strategy.cash,
+             max_bars_back=2000, max_lines_count=500)
+
+
+
+// #####################################
+//      INPUT
+// #####################################
+comienzo = input.int(10, 'Velaz hacia atras trazo de linea', maxval=1500)
+precio_alto = input.float(0.4575, 'Precio Máximo. ')
+//cantidad_lineas = input.int(10, 'Cantidad de lineas ', maxval=40)
+porcentaje = input.float (0.01666, '% Desplazamiento. Ej: 0.01618 ')
+// CONFIG STOP LOSS, TAKE PROFFIT
+take_proffit = input.float(defval=1.00, title="Take Proffit de Operaciones", step=0.5)
+// VENTANA DE TRABAJO
+// DESDE CUANDO COMIENZA EL ANALISIS
+l_starttime = input.time(defval=timestamp("01 Apr 2023 00:00 -0700"), title="Comienzo Periodo")
+l_endtime = input.time(defval=timestamp("31 Dec 2023 00:00 -0700"), title="Fin Periodo")
+windows = time >= l_starttime and time <= l_endtime
+//--
+// #####################################
+// #####################################
+
+
+// #####################################
+//      EMAS PARA POSICIONAMIENTO DEL PRECIO
+// #####################################
+emafast = input.int(defval=10, title="Ema Fast", minval = 5, step=1, group="Setup EMAS")
+ema_fast = ta.ema(close,emafast)
+plot(ema_fast,"Ema Fast",color=color.new(#22ac57, 0), linewidth=1)
+
+emaslow = input.int(defval=55, title="Ema Slow", minval = 13, step=1, group="Setup EMAS")
+ema_slow = ta.ema(close,emaslow)
+plot(ema_slow,"Ema Slow",color=color.new(#e4862e, 0), linewidth=1)
+
+ematrend = input.int(defval=200, title="Ema Trend", minval = 89, step=1, group="Setup EMAS")
+ema_trend = ta.ema(close,ematrend)
+plot(ema_trend,"Ema Trend",color=color.new(#4245f8, 8), linewidth=1)
+
+
+// #####################################
+// #####################################
+
+// #####################################
+//      FUNCIONES VARIAS
+// #####################################
+// Custom function to truncate (cut) excess decimal places
+truncate(_number, _decimalPlaces) =>
+    _factor = math.pow(10, _decimalPlaces)
+    int(_number * _factor) / _factor
+//---------------------
+
+// Operación que cuenta los lugares decimales despues del punto
+
+num_decimals = math.ceil(math.log10(1 / syminfo.mintick))
+
+
+// IMPRIMIR LINEAS DE FINAL DE CADA DIA
+
+// function
+drawVerticalLine(offset) =>
+    line.new(bar_index[offset], 1, bar_index[offset], 10,extend = extend.both , style=line.style_dashed, color=color.new(color.navy,20), width=1)
+
+// Solicitud del usuario
+linea_div_dias = input.bool(defval=true, title="Linea Separación Días / Mes")
+
+// logic
+is_newday() =>
+    d = time("D")
+    not na(d) and (na(d[1]) or d > d[1])
+is_timeframed() =>
+    //timeframe.isintraday or timeframe.isdaily
+    timeframe.isminutes
+
+// plotting
+if is_timeframed() and is_newday() and linea_div_dias
+    drawVerticalLine(0)
+//--
+
+
+// IMPRIMIR LINEAS DE FINAL DE CADA MES
+// logic
+is_newmonth() =>
+    t = time("M")
+    not na(t) and (na(t[1]) or t > t[1])
+is_timeframe() =>
+    //timeframe.isintraday or timeframe.isdaily
+    timeframe.isdaily
+
+// plotting
+if is_timeframe() and is_newmonth() and linea_div_dias
+    drawVerticalLine(0)
+
+//--
+
+
+// #####################################
+// #####################################
+
+
+// #####################################
+//      VARIABLES PERSISTENTES
+// #####################################
+nada = 0
+var float operaciones_de_compra = 0.00 
+var float precio_de_compra = 0.00
+var float precio_promedio = 0.00
+var float precio_salida = 0.00
+//var float take_proffit_operaciones = na
+var bool buySignal = false
+var bool sellSignal = false
+var bool comprar2 = na
+var bool comprar = na
+
+// #####################################
+// #####################################
+
+
+// #####################################
+//      OPERACIONES DE MERCADO : SALIDA
+// #####################################
+// ## CHEQUE SI ESTOY COMPRADO PARA EFECTUAR LA SALIDA
+comprado_salida = strategy.position_size > 0
+
+// ## SALIMOS DEL MERCADO
+if comprado_salida
+    // salir por Take Proffit
+    if high >= precio_salida
+        strategy.close("compra", comment="TP :" + str.tostring(precio_salida,"0.0000"),alert_message="EXIT")
+        operaciones_de_compra := 0.00
+        precio_de_compra := 0.00
+        precio_promedio := 0.00
+        precio_salida := 0.00
+        //color_linea = color.new(#f35858, 80)
+        //line.new(bar_index, 0, bar_index, 1e6, xloc.bar_index, extend.both, color_linea, line.style_solid, 8)
+        sellSignal := true
+
+// #####################################
+// #####################################
+
+
+// #####################################
+//      DIBUJAR LNEAS
+// #####################################
+
+var line linea_1 = na
+var line linea_2 = na
+var line linea_3 = na
+var line linea_4 = na
+var line linea_5 = na
+var line linea_6 = na
+var line linea_7 = na
+var line linea_8 = na
+var line linea_9 = na
+var line linea_10 = na
+var line linea_11 = na
+var line linea_12 = na
+var line linea_13 = na
+var line linea_14 = na
+var line linea_15 = na
+var line linea_16 = na
+var line linea_17 = na
+var line linea_18 = na
+var line linea_19 = na
+var line linea_20 = na
+
+var bool buy1 = false
+var bool buy2 = false 
+var bool buy3 = false 
+var bool buy4 = false 
+var bool buy5 = false 
+var bool buy6 = false 
+var bool buy7 = false 
+var bool buy8 = false 
+var bool buy9 = false 
+var bool buy10 = false 
+var bool buy11 = false
+var bool buy12 = false
+var bool buy13 = false 
+var bool buy14 = false 
+var bool buy15 = false 
+var bool buy16 = false 
+var bool buy17 = false 
+var bool buy18 = false 
+var bool buy19 = false 
+var bool buy20 = false 
+
+
+if windows // and barstate.islast
+    price_level = 0.0
+    if price_level == 0
+        price_level := precio_alto * (1-porcentaje)
+    //- 
+    linea_1 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1)
+    t1 = line.get_y2(linea_1)
+    buy1 := ta.crossunder(close,t1) 
+    //-
+    price_level := price_level * (1-porcentaje) 
+    linea_2 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1)
+    t2 = line.get_y2(linea_2)
+    buy2 := ta.crossunder(close,t2)
+    //-
+    price_level := price_level * (1-porcentaje) 
+    linea_3 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t3 = line.get_y2(linea_3)
+    buy3 := ta.crossunder(close,t3)
+    //-
+    price_level := price_level * (1-porcentaje) 
+    linea_4 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t4 = line.get_y2(linea_4)
+    buy4 := ta.crossunder(close,t4)
+    //-
+    price_level := price_level * (1-porcentaje) 
+    linea_5 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t5 = line.get_y2(linea_5)
+    buy5 := ta.crossunder(close,t5)
+    //-
+    price_level := price_level * (1-porcentaje) 
+    linea_6 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t6 = line.get_y2(linea_6)
+    buy6 := ta.crossunder(close,t6)
+    //-
+    price_level := price_level * (1-porcentaje) 
+    linea_7 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t7 = line.get_y2(linea_7)
+    buy7 := ta.crossunder(close,t7)
+    //-
+    price_level := price_level * (1-porcentaje) 
+    linea_8 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t8 = line.get_y2(linea_8)
+    buy8 := ta.crossunder(close,t8)
+    //-
+    price_level := price_level * (1-porcentaje) 
+    linea_9 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t9 = line.get_y2(linea_9)
+    buy9 := ta.crossunder(close,t9)
+    //-
+    price_level := price_level * (1-porcentaje) 
+    linea_10 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t10 = line.get_y2(linea_10)
+    buy10 := ta.crossunder(close,t10)
+    //-
+    price_level := price_level * (1-porcentaje) 
+    linea_11 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t11 = line.get_y2(linea_11)
+    buy11 := ta.crossunder(close,t11)
+    //
+    price_level := price_level * (1-porcentaje) 
+    linea_12 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t12 = line.get_y2(linea_12)
+    buy12 := ta.crossunder(close,t12)
+    //
+    price_level := price_level * (1-porcentaje) 
+    linea_13 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t13 = line.get_y2(linea_13)
+    buy13 := ta.crossunder(close,t13)
+    //
+    price_level := price_level * (1-porcentaje) 
+    linea_14 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t14 = line.get_y2(linea_14)
+    buy14 := ta.crossunder(close,t14)
+    //
+    price_level := price_level * (1-porcentaje) 
+    linea_15 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t15 = line.get_y2(linea_15)
+    buy15 := ta.crossunder(close,t15)
+    //
+    price_level := price_level * (1-porcentaje) 
+    linea_16 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t16 = line.get_y2(linea_16)
+    buy16 := ta.crossunder(close,t16)
+    //
+    price_level := price_level * (1-porcentaje) 
+    linea_17 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t17 = line.get_y2(linea_17)
+    buy17 := ta.crossunder(close,t17)
+    //
+    price_level := price_level * (1-porcentaje) 
+    linea_18 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t18 = line.get_y2(linea_18)
+    buy18 := ta.crossunder(close,t18)
+    //
+    price_level := price_level * (1-porcentaje) 
+    linea_19 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t19 = line.get_y2(linea_19)
+    buy19 := ta.crossunder(close,t19)
+    //
+    price_level := price_level * (1-porcentaje) 
+    linea_20 := line.new(bar_index[comienzo], price_level, bar_index + 1, price_level, color=color.gray, width=1) 
+    t20 = line.get_y2(linea_20)
+    buy20 := ta.crossunder(close,t20)
+    //
+
+
+line.delete(linea_1[1])
+line.delete(linea_2[1])
+line.delete(linea_3[1])
+line.delete(linea_4[1])
+line.delete(linea_5[1])
+line.delete(linea_6[1])
+line.delete(linea_7[1])
+line.delete(linea_8[1])
+line.delete(linea_9[1])
+line.delete(linea_10[1])
+line.delete(linea_11[1])
+line.delete(linea_12[1])
+line.delete(linea_13[1])
+line.delete(linea_14[1])
+line.delete(linea_15[1])
+line.delete(linea_16[1])
+line.delete(linea_17[1])
+line.delete(linea_18[1])
+line.delete(linea_19[1])
+line.delete(linea_20[1])
+
+myColorbuy1 = buy1 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy1)
+myColorbuy2 = buy2 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy2)
+myColorbuy3 = buy3 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy3)
+myColorbuy4 = buy4 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy4)
+myColorbuy5 = buy5 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy5)
+myColorbuy6 = buy6 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy6)
+myColorbuy7 = buy7 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy7)
+myColorbuy8 = buy8 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy8)
+myColorbuy9 = buy9 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy9)
+myColorbuy10 = buy10 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy10)
+myColorbuy11 = buy11 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy11)
+myColorbuy12 = buy12 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy12)
+myColorbuy13 = buy13 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy13)
+myColorbuy14 = buy14 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy14)
+myColorbuy15 = buy15 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy15)
+myColorbuy16 = buy16 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy16)
+myColorbuy17 = buy17 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy17)
+myColorbuy18 = buy18 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy18)
+myColorbuy19 = buy19 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy19)
+myColorbuy20 = buy20 ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy20)
+
+
+
+// #####################################
+// #####################################
+
+
+// #####################################
+//      OPERACIONES E MERCADO : INGRESO
+// #####################################
+// cheque para saber si es la primera operacion o los agregados de ordenes piramidales
+comprado = strategy.position_size > 0
+
+
+//comprar := buy1 ? true : na
+if buy1 or buy2 or buy3 or buy4 or buy5 or buy6 or buy7 or buy8 or buy9 or buy10 or buy11 or buy12 or buy13 or buy14 or buy15 or buy16 or buy17 or buy18 or buy19 or buy20
+    comprar := true
+else
+    comprar := false
+
+// mercado bull - primera compra
+if not comprado and windows and comprar and not comprar[1]
+    cantidad = 1 //math.round(strategy.equity / close) 
+    strategy.entry("compra",strategy.long,qty=cantidad,comment="PE : " + str.tostring(close,"0.0000"),alert_message="LONG")
+    operaciones_de_compra := operaciones_de_compra + 1
+    precio_de_compra := close
+    precio_promedio := precio_promedio + precio_de_compra
+    //color_linea = color.new(#2dcc28,80)
+    //line.new(bar_index, 0, bar_index, 1e6, xloc.bar_index, extend.both, color_linea, line.style_solid, 8)
+    buySignal := true
+    
+// mercado bull - agregado de ordenes piramidales
+if comprado and windows and comprar and not comprar[1]
+    cantidad = 1 //math.round(strategy.equity / close) 
+    strategy.order("compra",strategy.long,qty=cantidad,comment="PE : " + str.tostring(close,"0.0000"),alert_message="LONG")
+    operaciones_de_compra := operaciones_de_compra + 1
+    precio_de_compra := close
+    precio_promedio := precio_promedio + precio_de_compra
+    //color_linea = color.new(#2dcc28,80)
+    //line.new(bar_index, 0, bar_index, 1e6, xloc.bar_index, extend.both, color_linea, line.style_solid, 8)
+    buySignal := true
+
+
+
+// #####################################
+// #####################################
+
+
+// #####################################
+//      CONTEO DE LAS OPERACIONES
+// #####################################
+
+precio_promedio_OP = truncate((precio_promedio / operaciones_de_compra),num_decimals) 
+precio_salida := truncate((precio_promedio_OP * ( 1 + (take_proffit / 100))),num_decimals)
+
+// #####################################
+// #####################################
+
+
+// #####################################
+//      PLOTEO
+// #####################################
+myColorsell = sellSignal ? color.new(#fd2e2e, 80) : na
+bgcolor(myColorsell)
+
+buySignal := false
+sellSignal := false
+
+
+// #####################################
+// #####################################
+
+
+// #####################################
+//      TABLA DE OPERACIONES
+// #####################################
+var table testTable = table.new(position.top_right, 5, 4, border_width=1)
+f_fillCell(_table, _column, _row, _title, _value, _bgcolor, _txtcolor) =>
+    _cellText = _title + "\n" + _value
+    table.cell(_table, _column, _row, _cellText, bgcolor=_bgcolor, text_color=_txtcolor)
+var bgcolor = color.new(color.black,0)
+
+// Informacion para mostrar
+// Columna 1
+f_fillCell(testTable, 0, 0, "TOTAL OP", str.tostring(operaciones_de_compra), bgcolor, color.white)
+f_fillCell(testTable, 0, 1, "P P C", "$ " + str.tostring(precio_promedio_OP), color.navy, color.white)
+f_fillCell(testTable, 0, 2, "EXIT OP","$ " + str.tostring(precio_salida), color.green, color.white)
+//f_fillCell(testTable, 0, 2, "L T Loss", str.tostring(nada), color.red, color.white)
+//f_fillCell(testTable, 0, 3, "S T Loss", str.tostring(nada), color.red, color.white)
+//--
+
+//Columna 2
+//f_fillCell(testTable, 1, 0, "T OP", str.tostring(operaciones_de_compra), bgcolor, color.white)
+//f_fillCell(testTable, 0, 1, "Win Rate:", tostring(truncate((strategy.wintrades/strategy.closedtrades)*100,2)) + "%", bgcolor, color.white)
+
+//f_fillCell(testTable, 1, 1, "Winn Trade", str.tostring(nada), color.green, color.white)
+//f_fillCell(testTable, 1, 2, "Loss Trade", str.tostring(nada), color.red, color.white)
+
+//porcentaje_positivo = 2
+//porcentaje_negativo = 1
+//if porcentaje_positivo > porcentaje_negativo
+//    f_fillCell(testTable, 1, 3, "R O I", "% " + str.tostring(truncate(( nada ),2)), color.green, color.white)
+//else
+//    f_fillCell(testTable, 1, 3, "R O I", "% " + str.tostring(truncate(( nada ),2)), color.red, color.white)
+
+
+// #####################################
+// #####################################
+
+
+
+// #####################################
+//      LIMPIAMOS LAS VARIABLES
+// #####################################
+buy1 := false
+buy2 := false
+buy3 := false
+buy4 := false
+buy5 := false
+buy6 := false
+buy7 := false
+buy8 := false
+buy9 := false
+buy10 := false
+buy11 := false
+buy12 := false
+buy13 := false
+buy14 := false
+buy15 := false
+buy16 := false
+buy17 := false
+buy18 := false
+buy19 := false
+buy20 := false
+
+// #####################################
+// #####################################
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////////////////////////        COLORES        ////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+Black   = color.new(#000000, 40)    ,      Charcoal= #363A45,      Gray    = #787B86,      LightGray = #9C9C9C,      Silver  = #C0C0C0,      White   = #FFFFFF
+Brown   = #A52A2A,      Red     = color.new(#FF0000,30) ,      Pink    = #FF69B4,      Gold      = #D4AF37,      Orange  = #FF6A00,      Yellow  = #FFFF00
+Green2   = #00AF00,      Teal    = #008080,      Lime    = #00FF0B,      Green = color.new(#008000,30)
+Navy    = color.new(#311B92,30) ,      Blue    = #0094FF,      Aqua    = #00BCD4       // #2962FF #00FFFF
+Purple  = #800080,      Fucshia = #E040FB   //#FF00FF
+None = color.new(Black, 100)
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+/////////////////////////////    ANALISIS DE DATOS PARA LA TABLA DE INFO    ////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+hull5m = request.security(syminfo.tickerid, "5", ta.ema(close,55), lookahead=barmerge.lookahead_off)
+close_5m = request.security(syminfo.tickerid, "5", ta.ema(close,10), lookahead=barmerge.lookahead_off)
+col_5m         = close_5m > hull5m ? Green : Red
+text_5m        = close_5m > hull5m ?  "🡅" : "🡇"
+//--
+hull15m = request.security(syminfo.tickerid, "15", ta.ema(close,55), lookahead=barmerge.lookahead_off)
+close_15m = request.security(syminfo.tickerid, "15", ta.ema(close,10), lookahead=barmerge.lookahead_off)
+col_15m         = close_15m > hull15m? Green : Red
+text_15m        = close_15m > hull15m?  "🡅" : "🡇"
+//--
+hull30m = request.security(syminfo.tickerid, "30", ta.ema(close,55), lookahead=barmerge.lookahead_off)
+close_30m = request.security(syminfo.tickerid, "30", ta.ema(close,10), lookahead=barmerge.lookahead_off)
+col_30m         = close_30m > hull30m? Green : Red
+text_30m        = close_30m > hull30m?  "🡅" : "🡇"
+//--
+hull1h = request.security(syminfo.tickerid, "60", ta.ema(close,55), lookahead=barmerge.lookahead_off)
+close_1h = request.security(syminfo.tickerid, "60", ta.ema(close,10), lookahead=barmerge.lookahead_off)
+col_60m         = close_1h > hull1h? Green : Red
+text_60m        = close_1h > hull1h?  "🡅" : "🡇"
+//--
+hull4h = request.security(syminfo.tickerid, "240", ta.ema(close,55), lookahead=barmerge.lookahead_off)
+close_4h = request.security(syminfo.tickerid, "240", ta.ema(close,10), lookahead=barmerge.lookahead_off)
+col_240m         = close_4h > hull4h ? Green : Red
+text_240m        = close_4h > hull4h?  "🡅" : "🡇"
+//--
+hullD = request.security(syminfo.tickerid, "D", ta.ema(close,55), lookahead=barmerge.lookahead_off)
+close_1d = request.security(syminfo.tickerid, "D", ta.ema(close,10), lookahead=barmerge.lookahead_off)
+col_d         = close_1d > hullD ? Green : Red
+text_d        = close_1d > hullD ?  "🡅" : "🡇"
+//--
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+
+
+
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+///////////////////////////////////////////////// PLOTS  TABLA DE DATOS ////////////////////////////////////////////////////
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+var tbl = table.new(position.bottom_right, 10, 11, frame_color=color.white, frame_width=1, border_width=2, border_color=color.new(color.white, 100))        //table.new(position.top_right, 6, 41, frame_color=#151715, frame_width=1, border_width=2, border_color=color.new(color.white, 100))
+//--
+table.cell(tbl, 0, 0, 'Chart', text_halign = text.align_center, bgcolor = Black, text_color = color.white, text_size = size.normal)
+table.cell(tbl, 1, 0, 'Trend', text_halign = text.align_center, bgcolor = Black, text_color = color.white, text_size = size.normal)
+//--
+table.cell(tbl, 0, 1, '5m',  text_halign = text.align_center, bgcolor = Navy, text_color = color.white, text_size = size.normal)
+table.cell(tbl, 0, 2, '15m', text_halign = text.align_center, bgcolor = Navy, text_color = color.white, text_size = size.normal)
+table.cell(tbl, 0, 3, '30m',  text_halign = text.align_center, bgcolor = Navy, text_color = color.white, text_size = size.normal)
+table.cell(tbl, 0, 4, '1h',  text_halign = text.align_center, bgcolor = Navy, text_color = color.white, text_size = size.normal)
+table.cell(tbl, 0, 5, '4h',  text_halign = text.align_center, bgcolor = Navy, text_color = color.white, text_size = size.normal)
+table.cell(tbl, 0, 6, 'D',  text_halign = text.align_center, bgcolor = Navy, text_color = color.white, text_size = size.normal)
+//--
+table.cell(tbl, 1, 1, text_5m,  text_halign = text.align_center, bgcolor = col_5m,  text_color = color.white, text_size = size.normal)
+table.cell(tbl, 1, 2, text_15m,  text_halign = text.align_center, bgcolor = col_15m,  text_color = color.white, text_size = size.normal)
+table.cell(tbl, 1, 3, text_30m, text_halign = text.align_center, bgcolor = col_30m, text_color = color.white, text_size = size.normal)
+table.cell(tbl, 1, 4, text_60m, text_halign = text.align_center, bgcolor = col_60m, text_color = color.white, text_size = size.normal)
+table.cell(tbl, 1, 5, text_240m, text_halign = text.align_center, bgcolor = col_240m, text_color = color.white, text_size = size.normal)
+table.cell(tbl, 1, 6, text_d,text_halign = text.align_center, bgcolor = col_d,text_color = color.white, text_size = size.normal)
+    
+////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////////
+

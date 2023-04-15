@@ -1,0 +1,377 @@
+// This source code is subject to the terms of the Mozilla Public License 2.0 at https://mozilla.org/MPL/2.0/
+// © juanvargas21979
+
+//@version=5
+strategy("Strategy DCA V2 [JUAN-VARGAS]",
+             shorttitle = "DCA V2 [JUAN-VARGAS]",
+             overlay=true,
+             initial_capital=100000000000,
+             currency=currency.USD,
+             default_qty_value=1,
+             default_qty_type=strategy.cash)
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+// FUNCIONES VARIAS                                                                 //
+//////////////////////////////////////////////////////////////////////////////////////
+
+// Custom function to truncate (cut) excess decimal places
+truncate(_number, _decimalPlaces) =>
+    _factor = math.pow(10, _decimalPlaces)
+    int(_number * _factor) / _factor
+//---------------------
+
+//////////////////////////////////////////////////////////////////////////////////////
+//==================================================================================//
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+// SETEO SELECCION DE FECHA Y OTROS                                                 //
+//////////////////////////////////////////////////////////////////////////////////////
+
+// DESDE CUANDO COMIENZA EL ANALISIS
+l_starttime = input.time(defval=timestamp("01 Nov 2022 00:00 -0700"), title="StartTime")
+l_endtime = input.time(defval=timestamp("31 Dec 2023 00:00 -0700"), title="EndTime")
+windows = time >= l_starttime and time <= l_endtime
+//--
+
+
+
+//--
+
+// CONFIG STOP LOSS, TAKE PROFFIT
+take_proffit = input.float(defval=1.00, title="Take Proffit de Operaciones", step=0.5)
+
+//--
+
+
+// IMPRIMIR LINEAS DE FINAL DE CADA DIA
+
+// function
+drawVerticalLine(offset) =>
+    line.new(bar_index[offset], 1, bar_index[offset], 10,extend = extend.both , style=line.style_dashed, color=color.new(color.navy,20), width=1)
+
+// Solicitud del usuario
+linea_div_dias = input.bool(defval=true, title="Linea Separación Días / Mes")
+
+// logic
+is_newday() =>
+    d = time("D")
+    not na(d) and (na(d[1]) or d > d[1])
+is_timeframed() =>
+    //timeframe.isintraday or timeframe.isdaily
+    timeframe.isminutes
+
+// plotting
+if is_timeframed() and is_newday() and linea_div_dias
+    drawVerticalLine(0)
+//--
+
+
+// IMPRIMIR LINEAS DE FINAL DE CADA MES
+// logic
+is_newmonth() =>
+    t = time("M")
+    not na(t) and (na(t[1]) or t > t[1])
+is_timeframe() =>
+    //timeframe.isintraday or timeframe.isdaily
+    timeframe.isdaily
+
+// plotting
+if is_timeframe() and is_newmonth() and linea_div_dias
+    drawVerticalLine(0)
+
+//--
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+//==================================================================================//
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+// VARIABLES PERSISTENTES                                                           //
+//////////////////////////////////////////////////////////////////////////////////////
+nada = 0
+var float operaciones_de_compra = 0.00 
+var float precio_de_compra = 0.00
+var float precio_promedio = 0.00
+var float precio_salida = 0.00
+//var float take_proffit_operaciones = na
+var bool buySignal = false
+var bool sellSignal = false
+var bool comprar2 = na
+var bool comprar = na
+
+//////////////////////////////////////////////////////////////////////////////////////
+//==================================================================================//
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+// INDICADOR A EVALUAR                                                              //
+//////////////////////////////////////////////////////////////////////////////////////
+
+// ##### ATRSPDFMA
+
+src = close //input.source(close, "Source", group = "Basic Settings")
+per = input.int(5, "Periodos", group = "Sample Setup - D/4H P=3 - 1H P=5 - 30/15/5M=8")
+vari = 2 //input.float(2, "Variación", step = 0.1, minval = 0.1, group = "Basic Settings") 
+mean = 0 //input.float(0, "Mean", step = 0.1, minval = -1, maxval = 1, group = "Basic Settings") 
+mult = 55 //input.float(55, "Velas atráz", group = "Basic Settings") 
+atrper = 50 //input.int(50, "ATR Periodos", group = "Basic Settings")
+color_tendencia = input.bool(true, "Color Tendencia", group="Linea Neutra / Long-Short") 
+
+showSigs = false //input.bool(false, "Show signals?", group= "UI Options")
+
+colorbars = false //input.bool(false, "Color bars?", group = "UI Options")
+
+_pdf(x, variance, mean)=>
+    out = (1.0/math.sqrt(2 * math.pi * math.pow(variance,2)) * math.exp(-math.pow(x-mean, 2)/(2 * math.pow(variance, 2))))
+    out
+
+_pdfma(src, period, variance, mean)=>
+    maxx = 3.5
+    step = math.pi/(period-1)
+    coeff = array.new_float(period, 0)
+    for k = 0 to period - 1
+        array.set(coeff, k, _pdf(k * step, variance, mean * math.pi))
+
+    sumw = array.get(coeff, 0)
+    sum  = array.get(coeff, 0) * src
+    
+    for k = 1 to period -1  
+        weight = nz(array.get(coeff, k)) * src
+        sumw += weight 
+        sum += weight * nz(src[k])
+    out = sum/sumw
+    out
+  
+ 
+multout = mult/100.0
+atr = ta.atr(atrper)
+
+val = _pdfma(src, per, vari, mean)
+stepSize = multout * atr
+
+_diff = val - nz(val[1])
+
+val := nz(val[1]) + ((_diff < stepSize and _diff > -stepSize) ? 0 : (_diff / stepSize) * stepSize)
+
+goLong_pre = ta.crossover(val, val[1])
+goShort_pre = ta.crossunder(val, val[1])
+
+contSwitch = 0
+contSwitch := nz(contSwitch[1])
+contSwitch := goLong_pre ? 1 : goShort_pre ? -1 : contSwitch
+
+goLong = goLong_pre and ta.change(contSwitch)
+goShort = goShort_pre and ta.change(contSwitch)
+
+temp_color = color.new(#3086F5, 30)
+
+greencolor = color_tendencia ? temp_color : color.green
+redcolor = color_tendencia ? temp_color : color.red
+
+plot(val,"Linea Soporte/Resistencia", color = contSwitch == 1  ? greencolor : redcolor, linewidth = 2)
+
+
+//var color SR_buyColor = color.new(#2dcc28, 0)
+//var color SR_sellColor = color.new(#3086f5, 0)
+
+
+//SR_htColor = SR_trend == 0 ? SR_buyColor : SR_sellColor
+//plot(SR_ht, title="Linea de Tendencia S/R", linewidth=2, color=SR_htColor)
+
+//buySignal = not na(SR_arrowUp) and (SR_trend == 0 and SR_trend[1] == 1)
+//sellSignal = not na(SR_arrowDown) and (SR_trend == 1 and SR_trend[1] == 0)
+
+//plotshape(buySignal ? SR_atrLow : na, title="Arrow Up", style=shape.triangleup, location=location.absolute, size=size.tiny, color=SR_buyColor)
+//plotshape(sellSignal ? SR_atrHigh : na, title="Arrow Down", style=shape.triangledown, location=location.absolute, size=size.tiny, color=SR_sellColor)
+
+//myColorbuy = buySignal ? color.new(color.rgb(3, 218, 38), 80) : na
+//bgcolor(myColorbuy)
+
+//myColorsell = sellSignal ? color.new(color.rgb(4, 70, 253), 80) : na
+//bgcolor(myColorsell)
+
+// ##### ATRSPDFMA
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+//==================================================================================//
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+// EMAS PARA SABER EL POSICIONAMIENTO DEL PERCIO                                    //
+//////////////////////////////////////////////////////////////////////////////////////
+emafast = input.int(defval=10, title="Ema Fast", minval = 5, step=1, group="Setup EMAS")
+ema_fast = ta.ema(close,emafast)
+plot(ema_fast,"Ema Fast",color=color.new(#3e51ff, 40), linewidth=1)
+
+emaslow = input.int(defval=55, title="Ema Slow", minval = 13, step=1, group="Setup EMAS")
+ema_slow = ta.ema(close,emaslow)
+plot(ema_slow,"Ema Slow",color=color.new(#fd3333, 40), linewidth=1)
+
+ematrend = input.int(defval=200, title="Ema Trend", minval = 89, step=1, group="Setup EMAS")
+ema_trend = ta.ema(close,ematrend)
+plot(ema_trend,"Ema Trend",color=color.new(#663e11, 40), linewidth=1)
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+//==================================================================================//
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+// OPERACIONES DE MERCADO  --> SALIDA                                               //
+//////////////////////////////////////////////////////////////////////////////////////
+
+// ## CHEQUE SI ESTOY COMPRADO PARA EFECTUAR LA SALIDA
+comprado_salida = strategy.position_size > 0
+
+// ## SALIMOS DEL MERCADO
+if comprado_salida
+    // salir por Take Proffit
+    if high >= precio_salida
+        strategy.close("compra", comment="TP :" + str.tostring(precio_salida,"0.00"),alert_message="EXIT")
+        operaciones_de_compra := 0.00
+        precio_de_compra := 0.00
+        precio_promedio := 0.00
+        precio_salida := 0.00
+        //color_linea = color.new(#f35858, 80)
+        //line.new(bar_index, 0, bar_index, 1e6, xloc.bar_index, extend.both, color_linea, line.style_solid, 8)
+        sellSignal := true
+
+//////////////////////////////////////////////////////////////////////////////////////
+//==================================================================================//
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+// OPERACIONES DE MERCADO  --> INGRESO                                              //
+//////////////////////////////////////////////////////////////////////////////////////
+// cheque para saber si es la primera operacion o los agregados de ordenes piramidales
+comprado = strategy.position_size > 0
+
+// condicion de compra en base al indicador de tendencia.
+//comprar = SR_trend == 0 and SR_trend[1] == 1
+
+// condicion de compra en base a la estregia del cierre de vela por encima de la tendencia
+// pobrar para mercado alcista o bajista cambiando la compra por arriba o por abajo de la tendencia
+comprar := close < val
+
+
+// mercado bull - primera compra
+if not comprado and windows and comprar and not comprar[1]
+    cantidad = 1 //math.round(strategy.equity / close) 
+    strategy.entry("compra",strategy.long,qty=cantidad,comment="PE : " + str.tostring(close,"0.00"),alert_message="LONG")
+    operaciones_de_compra := operaciones_de_compra + 1
+    precio_de_compra := close
+    precio_promedio := precio_promedio + precio_de_compra
+    //color_linea = color.new(#2dcc28,80)
+    //line.new(bar_index, 0, bar_index, 1e6, xloc.bar_index, extend.both, color_linea, line.style_solid, 8)
+    buySignal := true
+    
+// mercado bull - agregado de ordenes piramidales
+if comprado and windows and comprar and not comprar[1]
+    cantidad = 1 //math.round(strategy.equity / close) 
+    strategy.order("compra",strategy.long,qty=cantidad,comment="PE : " + str.tostring(close,"0.00"),alert_message="LONG")
+    operaciones_de_compra := operaciones_de_compra + 1
+    precio_de_compra := close
+    precio_promedio := precio_promedio + precio_de_compra
+    //color_linea = color.new(#2dcc28,80)
+    //line.new(bar_index, 0, bar_index, 1e6, xloc.bar_index, extend.both, color_linea, line.style_solid, 8)
+    buySignal := true
+
+//////////////////////////////////////////////////////////////////////////////////////
+//==================================================================================//
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+// CONTEO Y ANALISIS DE LAS OPERACIONES DE COMPRA                                   //
+//////////////////////////////////////////////////////////////////////////////////////
+
+precio_promedio_OP = precio_promedio / operaciones_de_compra 
+precio_salida := precio_promedio_OP * ( 1 + (take_proffit / 100))
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+//==================================================================================//
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+// PLOT DE OPERACIONES                                                              //
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+//plotshape(not buySignal[1] and  buySignal ? goLong : na, title="Arrow Up", style=shape.triangleup, location=location.belowbar, size=size.tiny, color=color.navy)
+//plotshape(not sellSignal[1]  and sellSignal ? goShort : na, title="Arrow Down", style=shape.triangledown, location=location.abovebar, size=size.tiny, color=color.red)
+
+myColorbuy = buySignal ? color.new(color.rgb(3, 218, 38), 80) : na
+bgcolor(myColorbuy)
+
+myColorsell = sellSignal ? color.new(#fd2e2e, 80) : na
+bgcolor(myColorsell)
+
+buySignal := false
+sellSignal := false
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+//==================================================================================//
+//////////////////////////////////////////////////////////////////////////////////////
+
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+// TABLA CON INFORMACION A MOSTRAR DE LAS OPERACIONES REALIZADAS                    //
+//////////////////////////////////////////////////////////////////////////////////////
+var table testTable = table.new(position.top_right, 5, 4, border_width=1)
+f_fillCell(_table, _column, _row, _title, _value, _bgcolor, _txtcolor) =>
+    _cellText = _title + "\n" + _value
+    table.cell(_table, _column, _row, _cellText, bgcolor=_bgcolor, text_color=_txtcolor)
+var bgcolor = color.new(color.black,0)
+
+// Informacion para mostrar
+// Columna 1
+f_fillCell(testTable, 0, 0, "TOTAL OP", str.tostring(operaciones_de_compra), bgcolor, color.white)
+f_fillCell(testTable, 0, 1, "P P C", "$ " + str.tostring(truncate(precio_promedio_OP,2)), color.navy, color.white)
+f_fillCell(testTable, 0, 2, "EXIT OP","$ " + str.tostring(truncate(precio_salida,2)), color.green, color.white)
+//f_fillCell(testTable, 0, 2, "L T Loss", str.tostring(nada), color.red, color.white)
+//f_fillCell(testTable, 0, 3, "S T Loss", str.tostring(nada), color.red, color.white)
+//--
+
+//Columna 2
+//f_fillCell(testTable, 1, 0, "T OP", str.tostring(operaciones_de_compra), bgcolor, color.white)
+//f_fillCell(testTable, 0, 1, "Win Rate:", tostring(truncate((strategy.wintrades/strategy.closedtrades)*100,2)) + "%", bgcolor, color.white)
+
+//f_fillCell(testTable, 1, 1, "Winn Trade", str.tostring(nada), color.green, color.white)
+//f_fillCell(testTable, 1, 2, "Loss Trade", str.tostring(nada), color.red, color.white)
+
+//porcentaje_positivo = 2
+//porcentaje_negativo = 1
+//if porcentaje_positivo > porcentaje_negativo
+//    f_fillCell(testTable, 1, 3, "R O I", "% " + str.tostring(truncate(( nada ),2)), color.green, color.white)
+//else
+//    f_fillCell(testTable, 1, 3, "R O I", "% " + str.tostring(truncate(( nada ),2)), color.red, color.white)
+
+
+//////////////////////////////////////////////////////////////////////////////////////
+//==================================================================================//
+//////////////////////////////////////////////////////////////////////////////////////
+
+
